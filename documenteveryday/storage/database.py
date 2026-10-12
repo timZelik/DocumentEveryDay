@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS clips (
     qa_fixes TEXT NOT NULL DEFAULT '[]',
     video_path TEXT NOT NULL DEFAULT '',
     review_status TEXT NOT NULL DEFAULT 'pending',
-    reviewed_at TEXT
+    reviewed_at TEXT,
+    voice_note_path TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS ai_decisions (
     id INTEGER PRIMARY KEY,
@@ -59,9 +60,19 @@ CREATE TABLE IF NOT EXISTS ai_decisions (
 );
 """
 
+# Columns added after the first release; CREATE TABLE IF NOT EXISTS never adds them to an existing file.
+ADDED_COLUMNS = (("clips", "voice_note_path", "TEXT NOT NULL DEFAULT ''"),)
+
 
 def utc_now_text() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def add_missing_columns(connection: sqlite3.Connection) -> None:
+    for table, column, definition in ADDED_COLUMNS:
+        existing_columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in existing_columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 class Database:
@@ -71,6 +82,7 @@ class Database:
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
+            add_missing_columns(connection)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

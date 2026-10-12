@@ -22,7 +22,7 @@ def seeded(tmp_path):
     repositories.ai_decisions.record(AiDecision(batch_id, clip_id, "copywrite", "m", 10, 5, 0.001, {"ok": 1}))
     repositories.ai_decisions.record(AiDecision(batch_id, None, "score_moments", "m", 10, 5, 0.002, {}))
     repositories.batches.set_total_cost(batch_id, 0.003)
-    client = TestClient(create_app(repositories, ACCESS_TOKEN))
+    client = TestClient(create_app(repositories, ACCESS_TOKEN, tmp_path))
     return client, repositories, batch_id, clip_id
 
 
@@ -75,4 +75,28 @@ def test_clip_media_supports_range_requests_for_ios_video(seeded):
 
 def test_app_refuses_to_start_without_a_token(tmp_path):
     with pytest.raises(ValueError):
-        create_app(make_repositories(tmp_path), "")
+        create_app(make_repositories(tmp_path), "", tmp_path)
+
+
+def test_swipe_up_marks_needs_review_and_stores_a_playable_voice_note(seeded):
+    client, repositories, _, clip_id = seeded
+    sign_in(client)
+    assert client.post(f"/api/clips/{clip_id}/review", json={"decision": "needs_review"}).status_code == 200
+    upload = client.put(f"/api/clips/{clip_id}/voice-note", content=b"fake-m4a", headers={"Content-Type": "audio/mp4"})
+    assert upload.status_code == 200
+    [clip] = client.get("/api/batches/latest").json()["clips"]
+    assert clip["review_status"] == "needs_review"
+    assert client.get(clip["voice_note_url"]).content == b"fake-m4a"
+
+
+def test_voice_note_rejects_non_audio_and_empty_uploads(seeded):
+    client, _, _, clip_id = seeded
+    sign_in(client)
+    assert (
+        client.put(f"/api/clips/{clip_id}/voice-note", content=b"x", headers={"Content-Type": "text/html"}).status_code
+        == 415
+    )
+    assert (
+        client.put(f"/api/clips/{clip_id}/voice-note", content=b"", headers={"Content-Type": "audio/mp4"}).status_code
+        == 400
+    )

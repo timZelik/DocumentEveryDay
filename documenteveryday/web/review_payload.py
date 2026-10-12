@@ -24,6 +24,7 @@ def public_clip(clip: dict, clip_decisions: list[dict]) -> dict:
         **{field: clip[field] for field in PUBLIC_CLIP_FIELDS},
         "is_playable": bool(clip["video_path"]),
         "video_url": f"/media/clips/{clip['id']}",
+        "voice_note_url": f"/media/voice-notes/{clip['id']}" if clip["voice_note_path"] else "",
         "clipboard_text": clip_copy.clipboard_text,
         "ai_decisions": clip_decisions,
         "ai_cost_dollars": sum(decision["cost_dollars"] for decision in clip_decisions),

@@ -9,7 +9,7 @@ from documenteveryday.storage.database import Database, utc_now_text
 CLIP_JSON_COLUMNS = ("criteria", "hashtags", "qa_fixes")
 UPDATABLE_CLIP_COLUMNS = {
     "start_seconds", "end_seconds", "hook_line", "title", "post_caption", "hashtags",
-    "qa_status", "qa_summary", "qa_fixes", "video_path", "review_status", "reviewed_at",
+    "qa_status", "qa_summary", "qa_fixes", "video_path", "review_status", "reviewed_at", "voice_note_path",
 }  # fmt: skip
 
 

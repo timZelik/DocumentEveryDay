@@ -30,4 +30,4 @@ def build_pipeline(settings: Settings, repositories: Repositories, notifier: Not
 
 
 def build_web_app(settings: Settings):
-    return create_app(build_repositories(settings), settings.access_token)
+    return create_app(build_repositories(settings), settings.access_token, settings.data_directory)

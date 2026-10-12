@@ -50,3 +50,16 @@ def test_retention_query_only_returns_owned_undeleted_videos(tmp_path):
     assert [video["id"] for video in repositories.source_videos.owned_uploaded_before("9999")] == [owned_id]
     repositories.source_videos.mark_deleted(owned_id)
     assert repositories.source_videos.owned_uploaded_before("9999") == []
+
+
+def test_old_database_files_gain_new_columns(tmp_path):
+    import sqlite3
+
+    database_path = tmp_path / "old.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute("CREATE TABLE clips (id INTEGER PRIMARY KEY, batch_id INTEGER)")
+    connection.commit()
+    connection.close()
+    Database(database_path)
+    columns = {row[1] for row in sqlite3.connect(database_path).execute("PRAGMA table_info(clips)")}
+    assert "voice_note_path" in columns

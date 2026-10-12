@@ -1,12 +1,17 @@
 "use strict";
 
-// The review page: one clip at a time. Swipe right approves (share sheet + caption copied), left rejects.
+// The review page, one clip at a time, Tinder-style:
+//   swipe right → approve: caption copied + iOS share sheet ("Save Video")
+//   swipe left  → reject
+//   swipe up    → needs another look: record a voice note saying why
 
 const SWIPE_THRESHOLD_PIXELS = 90;
+const FLY_OFF_MILLISECONDS = 250;
 const POLL_INTERVAL_MILLISECONDS = 10000;
 const FINISHED_BATCH_STATUSES = ["ready", "failed"];
+const VOICE_NOTE_MIME_TYPES = ["audio/mp4", "audio/webm", "audio/ogg"];
 
-const state = { payload: null, clipIndex: 0, videoFilesByClipId: new Map() };
+const state = { payload: null, passStatus: "pending", queue: [], queueIndex: 0, videoFilesByClipId: new Map() };
 
 // ---------- data ----------
 
@@ -25,17 +30,20 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
-function playableClips() {
-  return state.payload ? state.payload.clips.filter((clip) => clip.is_playable) : [];
+function clipsWithStatus(reviewStatus) {
+  return state.payload.clips.filter((clip) => clip.is_playable && clip.review_status === reviewStatus);
 }
 
 function currentClip() {
-  return playableClips()[state.clipIndex];
+  return state.queue[state.queueIndex];
 }
 
-function firstPendingClipIndex() {
-  const index = playableClips().findIndex((clip) => clip.review_status === "pending");
-  return index === -1 ? playableClips().length : index;
+// A pass walks every clip that had a given status when it started: first "pending", later "needs_review".
+function startPass(reviewStatus) {
+  state.passStatus = reviewStatus;
+  state.queue = clipsWithStatus(reviewStatus);
+  state.queueIndex = 0;
+  renderCurrentCard();
 }
 
 async function loadBatch() {
@@ -43,15 +51,11 @@ async function loadBatch() {
   try {
     state.payload = await fetchJson(`/api/batches/${batchIdFromPath()}`);
   } catch (error) {
-    renderEmptyState("No batches yet", "Upload an evening of footage to get started.", true);
+    renderEmptyState("No batches yet", "Upload an evening of footage to get started.", [uploadLink()]);
     return;
   }
   renderHeader();
-  // Polling must never yank away the clip being watched; it only fills an empty screen.
-  if (!wasShowingCard) {
-    state.clipIndex = firstPendingClipIndex();
-    renderCurrentCard();
-  }
+  if (!wasShowingCard) startPass("pending"); // polling never yanks away the clip being watched
   if (!FINISHED_BATCH_STATUSES.includes(state.payload.batch.status)) {
     setTimeout(loadBatch, POLL_INTERVAL_MILLISECONDS);
   }
@@ -70,7 +74,7 @@ function recordDecision(clip, decision) {
 // ---------- video files for the share sheet ----------
 
 function videoFileName(clip) {
-  const safeTitle = (clip.title || `clip ${clip.id}`).replace(/[^\w\- ]+/g, "").trim() || `clip ${clip.id}`;
+  const safeTitle = (clip.title || "").replace(/[^\w\- ]+/g, "").trim() || `clip ${clip.id}`;
   return `${safeTitle}.mp4`;
 }
 
@@ -78,9 +82,10 @@ function videoFileName(clip) {
 function prefetchVideoFile(clip) {
   if (!clip || state.videoFilesByClipId.has(clip.id)) return;
   const entry = { file: null };
-  entry.ready = fetch(clip.video_url)
+  fetch(clip.video_url)
     .then((response) => response.blob())
-    .then((blob) => (entry.file = new File([blob], videoFileName(clip), { type: "video/mp4" })));
+    .then((blob) => (entry.file = new File([blob], videoFileName(clip), { type: "video/mp4" })))
+    .catch(() => state.videoFilesByClipId.delete(clip.id));
   state.videoFilesByClipId.set(clip.id, entry);
 }
 
@@ -92,18 +97,17 @@ function shareVideoFile(clip) {
   return navigator.share({ files: [file] });
 }
 
-// ---------- actions ----------
+// ---------- the three decisions ----------
 
 function approveCurrentClip() {
   const clip = currentClip();
   if (!clip) return;
   if (navigator.clipboard) navigator.clipboard.writeText(clip.clipboard_text).catch(() => {});
   recordDecision(clip, "approved");
-  shareVideoFile(clip)
-    .then(() => advanceToNextClip())
+  shareVideoFile(clip) // started first: the share sheet only opens inside the user's gesture
+    .then(() => flyOffThenAdvance("right"))
     .catch((error) => {
-      if (error.name === "AbortError") return renderCurrentCard();
-      showToast("Caption copied. Tap “Save video” when it's ready.");
+      if (error.name !== "AbortError") showToast("Caption copied. Tap “Save video” when it's ready.");
       renderCurrentCard();
     });
 }
@@ -112,12 +116,91 @@ function rejectCurrentClip() {
   const clip = currentClip();
   if (!clip) return;
   recordDecision(clip, "rejected");
-  advanceToNextClip();
+  flyOffThenAdvance("left");
+}
+
+function sendCurrentClipForFurtherReview() {
+  const clip = currentClip();
+  if (!clip) return;
+  recordDecision(clip, "needs_review");
+  openVoiceNoteSheet(clip);
 }
 
 function advanceToNextClip() {
-  state.clipIndex = Math.min(state.clipIndex + 1, playableClips().length);
+  state.queueIndex = Math.min(state.queueIndex + 1, state.queue.length);
   renderCurrentCard();
+}
+
+function flyOffThenAdvance(direction) {
+  const card = document.querySelector(".card");
+  if (!card) return advanceToNextClip();
+  const offscreen = { right: "translateX(140vw) rotate(25deg)", left: "translateX(-140vw) rotate(-25deg)", up: "translateY(-140vh)" };
+  card.style.transition = `transform ${FLY_OFF_MILLISECONDS}ms ease-in`;
+  card.style.transform = offscreen[direction];
+  setTimeout(advanceToNextClip, FLY_OFF_MILLISECONDS);
+}
+
+// ---------- voice note for "needs review" ----------
+
+function preferredVoiceNoteMimeType() {
+  return VOICE_NOTE_MIME_TYPES.find((mimeType) => window.MediaRecorder && MediaRecorder.isTypeSupported(mimeType)) || "";
+}
+
+function uploadVoiceNote(clip, blob) {
+  return fetchJson(`/api/clips/${clip.id}/voice-note`, {
+    method: "PUT",
+    headers: { "Content-Type": blob.type.split(";")[0] || "audio/mp4" },
+    body: blob,
+  }).then((response) => (clip.voice_note_url = response.voice_note_url));
+}
+
+function closeSheetAndAdvance(sheet) {
+  sheet.remove();
+  flyOffThenAdvance("up");
+}
+
+function openVoiceNoteSheet(clip) {
+  const sheet = element("div", "voice-note-sheet");
+  const status = element("p", "muted", "Why does this clip need another look? Tap to record.");
+  const recordButton = element("button", "record-button", "● Record");
+  const skipButton = element("button", "", "Skip note");
+  const actions = element("div", "card-actions");
+  actions.append(skipButton, recordButton);
+  sheet.append(element("h3", "", "Needs further review"), status, actions);
+  document.body.append(sheet);
+
+  let recorder = null;
+  let startedAt = 0;
+  let timer = null;
+  skipButton.addEventListener("click", () => {
+    if (recorder && recorder.state === "recording") recorder.stop();
+    closeSheetAndAdvance(sheet);
+  });
+  recordButton.addEventListener("click", async () => {
+    if (recorder && recorder.state === "recording") return recorder.stop();
+    if (!preferredVoiceNoteMimeType()) return (status.textContent = "This browser can't record audio.");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      recorder = new MediaRecorder(stream, { mimeType: preferredVoiceNoteMimeType() });
+      recorder.addEventListener("dataavailable", (event) => event.data.size && chunks.push(event.data));
+      recorder.addEventListener("stop", () => {
+        clearInterval(timer);
+        stream.getTracks().forEach((track) => track.stop());
+        status.textContent = "Saving your note…";
+        uploadVoiceNote(clip, new Blob(chunks, { type: recorder.mimeType }))
+          .then(() => showToast("Sent for further review with your note."))
+          .catch(() => showToast("Marked for review, but the note didn't upload."))
+          .finally(() => closeSheetAndAdvance(sheet));
+      });
+      recorder.start();
+      startedAt = Date.now();
+      recordButton.textContent = "■ Stop & send";
+      timer = setInterval(() => (status.textContent = `Recording… ${Math.round((Date.now() - startedAt) / 1000)}s`), 250);
+    } catch (error) {
+      status.textContent = "Microphone permission was denied. You can skip the note.";
+    }
+  });
 }
 
 // ---------- rendering ----------
@@ -129,6 +212,12 @@ function element(tagName, className, text) {
   return created;
 }
 
+function uploadLink() {
+  const link = element("a", "", "Upload footage");
+  link.href = "/upload";
+  return link;
+}
+
 function showToast(message) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -138,33 +227,34 @@ function showToast(message) {
 }
 
 function renderHeader() {
-  const { batch, clips, total_cost_dollars: totalCost } = state.payload;
-  const pendingCount = clips.filter((clip) => clip.is_playable && clip.review_status === "pending").length;
+  const { batch, total_cost_dollars: totalCost } = state.payload;
+  const pendingCount = clipsWithStatus("pending").length;
   const detail = batch.status === "ready" ? `${pendingCount} to review` : batch.status_detail || batch.status;
   document.getElementById("batch-status").textContent = `Batch #${batch.id} · ${detail}`;
   document.getElementById("batch-cost").textContent = `AI cost $${totalCost.toFixed(4)}`;
 }
 
-function renderEmptyState(title, message, showUploadLink) {
-  const container = document.getElementById("card-container");
+function renderEmptyState(title, message, extraElements = []) {
   const emptyState = element("div", "empty-state");
-  emptyState.append(element("h2", "", title), element("p", "muted", message));
-  if (showUploadLink) {
-    const link = element("a", "", "Upload footage");
-    link.href = "/upload";
-    emptyState.append(link);
-  }
-  container.replaceChildren(emptyState);
+  emptyState.append(element("h2", "", title), element("p", "muted", message), ...extraElements);
+  document.getElementById("card-container").replaceChildren(emptyState);
 }
 
 function renderFinishedState() {
-  const { batch, clips } = state.payload;
+  const { batch } = state.payload;
   if (!FINISHED_BATCH_STATUSES.includes(batch.status)) {
     return renderEmptyState("Processing…", batch.status_detail || "Your phone buzzes when clips are ready.");
   }
-  if (batch.status === "failed") return renderEmptyState("This batch failed", batch.status_detail, true);
-  const approvedCount = clips.filter((clip) => clip.review_status === "approved").length;
-  renderEmptyState("All reviewed", `${approvedCount} approved of ${playableClips().length} clips.`, true);
+  if (batch.status === "failed") return renderEmptyState("This batch failed", batch.status_detail, [uploadLink()]);
+  const counts = ["approved", "rejected", "needs_review"].map((status) => clipsWithStatus(status).length);
+  const extras = [];
+  if (counts[2]) {
+    const reviewAgainButton = element("button", "primary-button", `Review ${counts[2]} flagged for another look`);
+    reviewAgainButton.addEventListener("click", () => startPass("needs_review"));
+    extras.push(reviewAgainButton);
+  }
+  extras.push(uploadLink());
+  renderEmptyState("All reviewed", `${counts[0]} approved · ${counts[1]} rejected · ${counts[2]} need another look`, extras);
 }
 
 function chipsFor(clip) {
@@ -176,13 +266,22 @@ function chipsFor(clip) {
     element("span", `chip ${clip.qa_status}`, `QA ${clip.qa_status}`),
     element("span", "chip", `$${clip.ai_cost_dollars.toFixed(4)}`),
   );
-  if (clip.review_status !== "pending") chips.append(element("span", `chip ${clip.review_status}`, clip.review_status));
+  if (clip.review_status !== "pending") {
+    chips.append(element("span", `chip ${clip.review_status}`, clip.review_status.replace("_", " ")));
+  }
   return chips;
 }
 
 function qaLineFor(clip) {
   const fixes = clip.qa_fixes.length ? ` Fixes: ${clip.qa_fixes.join("; ")}` : "";
   return element("p", `clip-qa ${clip.qa_status}`, `QA: ${clip.qa_summary}${fixes}`);
+}
+
+function voiceNotePlayerFor(clip) {
+  if (!clip.voice_note_url) return [];
+  const player = element("audio", "voice-note-player");
+  Object.assign(player, { src: clip.voice_note_url, controls: true, preload: "none" });
+  return [element("p", "clip-reason", "Your note:"), player];
 }
 
 function decisionLogFor(clip) {
@@ -200,13 +299,17 @@ function decisionLogFor(clip) {
 
 function actionButtonsFor(clip, decisionLog) {
   const actions = element("div", "card-actions");
-  const rejectButton = element("button", "reject-button", "✕ Reject");
-  const detailsButton = element("button", "", "AI log");
-  const approveButton = element("button", "approve-button", clip.review_status === "approved" ? "Save video" : "✓ Approve");
-  rejectButton.addEventListener("click", rejectCurrentClip);
-  approveButton.addEventListener("click", approveCurrentClip);
-  detailsButton.addEventListener("click", () => (decisionLog.hidden = !decisionLog.hidden));
-  actions.append(rejectButton, detailsButton, approveButton);
+  const buttons = [
+    ["reject-button", "✕", rejectCurrentClip],
+    ["review-button", "↑ Review", sendCurrentClipForFurtherReview],
+    ["", "AI log", () => (decisionLog.hidden = !decisionLog.hidden)],
+    ["approve-button", clip.review_status === "approved" ? "Save video" : "✓ Save", approveCurrentClip],
+  ];
+  for (const [className, label, onClick] of buttons) {
+    const button = element("button", className, label);
+    button.addEventListener("click", onClick);
+    actions.append(button);
+  }
   return actions;
 }
 
@@ -228,6 +331,7 @@ function overlayFor(clip) {
     element("h2", "clip-title", clip.title || clip.hook_line || `Clip ${clip.id}`),
     element("p", "clip-reason", `Why: ${clip.pick_reason}`),
     qaLineFor(clip),
+    ...voiceNotePlayerFor(clip),
     actionButtonsFor(clip, decisionLog),
     decisionLog,
   );
@@ -238,12 +342,13 @@ function renderCurrentCard() {
   const clip = currentClip();
   if (!clip) return renderFinishedState();
   prefetchVideoFile(clip);
-  prefetchVideoFile(playableClips()[state.clipIndex + 1]);
+  prefetchVideoFile(state.queue[state.queueIndex + 1]);
   const card = element("section", "card");
   card.append(
     videoFor(clip),
     element("div", "swipe-hint approve", "SAVE"),
     element("div", "swipe-hint reject", "NOPE"),
+    element("div", "swipe-hint review", "REVIEW"),
     overlayFor(clip),
   );
   attachSwipeGestures(card);
@@ -252,36 +357,50 @@ function renderCurrentCard() {
 
 // ---------- gestures ----------
 
+function swipeDirection(deltaX, deltaY) {
+  if (-deltaY > SWIPE_THRESHOLD_PIXELS && -deltaY > Math.abs(deltaX)) return "up";
+  if (deltaX > SWIPE_THRESHOLD_PIXELS) return "right";
+  if (deltaX < -SWIPE_THRESHOLD_PIXELS) return "left";
+  return null;
+}
+
 function attachSwipeGestures(card) {
-  let startX = null;
-  const hints = { approve: card.querySelector(".swipe-hint.approve"), reject: card.querySelector(".swipe-hint.reject") };
-  const isInsideLog = (event) => event.target.closest(".decision-log");
+  let start = null;
+  const hint = (name) => card.querySelector(`.swipe-hint.${name}`);
+  const ignoresSwipes = (event) => event.target.closest(".decision-log, audio, button");
 
   card.addEventListener("touchstart", (event) => {
-    startX = isInsideLog(event) ? null : event.touches[0].clientX;
+    start = ignoresSwipes(event) ? null : { x: event.touches[0].clientX, y: event.touches[0].clientY };
     card.style.transition = "none";
   });
   card.addEventListener("touchmove", (event) => {
-    if (startX === null) return;
-    const deltaX = event.touches[0].clientX - startX;
-    card.style.transform = `translateX(${deltaX}px) rotate(${deltaX / 40}deg)`;
-    hints.approve.style.opacity = Math.max(0, deltaX / SWIPE_THRESHOLD_PIXELS);
-    hints.reject.style.opacity = Math.max(0, -deltaX / SWIPE_THRESHOLD_PIXELS);
-  });
+    if (!start) return;
+    event.preventDefault(); // the card follows the finger instead of the page scrolling
+    const deltaX = event.touches[0].clientX - start.x;
+    const deltaY = event.touches[0].clientY - start.y;
+    card.style.transform = `translate(${deltaX}px, ${Math.min(deltaY, 0)}px) rotate(${deltaX / 40}deg)`;
+    hint("approve").style.opacity = Math.max(0, deltaX / SWIPE_THRESHOLD_PIXELS);
+    hint("reject").style.opacity = Math.max(0, -deltaX / SWIPE_THRESHOLD_PIXELS);
+    hint("review").style.opacity = Math.max(0, -deltaY / SWIPE_THRESHOLD_PIXELS);
+  }, { passive: false });
   card.addEventListener("touchend", (event) => {
-    if (startX === null) return;
-    const deltaX = event.changedTouches[0].clientX - startX;
-    startX = null;
+    if (!start) return;
+    const direction = swipeDirection(event.changedTouches[0].clientX - start.x, event.changedTouches[0].clientY - start.y);
+    start = null;
     card.style.transition = "";
     card.style.transform = "";
-    if (deltaX > SWIPE_THRESHOLD_PIXELS) approveCurrentClip();
-    else if (deltaX < -SWIPE_THRESHOLD_PIXELS) rejectCurrentClip();
+    card.querySelectorAll(".swipe-hint").forEach((swipeHint) => (swipeHint.style.opacity = 0));
+    if (direction === "right") approveCurrentClip();
+    if (direction === "left") rejectCurrentClip();
+    if (direction === "up") sendCurrentClipForFurtherReview();
   });
 }
 
 document.addEventListener("keydown", (event) => {
+  if (document.querySelector(".voice-note-sheet")) return;
   if (event.key === "ArrowRight") approveCurrentClip();
   if (event.key === "ArrowLeft") rejectCurrentClip();
+  if (event.key === "ArrowUp") sendCurrentClipForFurtherReview();
 });
 
 loadBatch();
