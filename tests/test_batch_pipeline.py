@@ -7,7 +7,7 @@ from documenteveryday.media.ffmpeg_tools import probe_video_dimensions
 from documenteveryday.notifications.notifier import LoggingNotifier
 from documenteveryday.pipeline.batch_pipeline import BatchPipeline
 from tests.fake_claude import FakeClaudeClient
-from tests.pipeline_fakes import FakeTranscriber, analysis_routes
+from tests.pipeline_fakes import FakeTranscriber, analysis_routes, full_routes
 from tests.test_repositories import make_repositories
 
 
@@ -45,7 +45,7 @@ def run_batch(tmp_path, video_path, routes, **setting_overrides):
 
 @pytest.mark.ffmpeg
 def test_pipeline_turns_footage_into_reviewable_clips_and_logs_cost(tmp_path, synthetic_landscape_video):
-    repositories, batch_id, notifier, client = run_batch(tmp_path, synthetic_landscape_video, analysis_routes())
+    repositories, batch_id, notifier, client = run_batch(tmp_path, synthetic_landscape_video, full_routes())
     batch = repositories.batches.get(batch_id)
     [clip] = repositories.clips.for_batch(batch_id)
     assert batch["status"] == "ready", batch["status_detail"]
@@ -55,7 +55,12 @@ def test_pipeline_turns_footage_into_reviewable_clips_and_logs_cost(tmp_path, sy
     dimensions = probe_video_dimensions(clip["video_path"])
     assert (dimensions.width, dimensions.height) == (1080, 1920)
     purposes = [decision["purpose"] for decision in repositories.ai_decisions.for_batch(batch_id)]
-    assert {"classify_segments", "score_moments"} <= set(purposes)
+    assert {"classify_segments", "score_moments", "refresh_voice_profile", "write_copy", "translate_arabic"} <= set(
+        purposes
+    )
+    assert clip["title"] == "Bracing changed my deadlift" and clip["hashtags"] == ["deadlift", "gym"]
+    assert clip["qa_status"] in {"passed", "fixed"}, clip["qa_summary"]
+    assert (tmp_path / "my_voice.md").read_text().startswith("## Openers")
     assert batch["total_cost_dollars"] == pytest.approx(repositories.ai_decisions.total_cost_for_batch(batch_id))
     assert all(request["model"] == "claude-haiku-5-5" for request in client.requests)
 
@@ -69,3 +74,14 @@ def test_budget_too_small_fails_the_batch_before_spending(tmp_path, synthetic_la
     assert batch["status"] == "failed" and "BatchBudgetExceeded" in batch["status_detail"]
     assert notifier.events[0][0] == "failed"
     assert client.requests == []
+
+
+@pytest.mark.ffmpeg
+def test_clips_still_ship_flagged_when_per_clip_ai_is_unavailable(tmp_path, synthetic_landscape_video):
+    repositories, batch_id, notifier, _ = run_batch(tmp_path, synthetic_landscape_video, analysis_routes())
+    [clip] = repositories.clips.for_batch(batch_id)
+    assert repositories.batches.get(batch_id)["status"] == "ready"
+    assert clip["qa_status"] == "flagged"
+    assert "Copy is a plain fallback" in clip["qa_summary"]
+    assert clip["title"].startswith("okay this is my last")
+    assert clip["video_path"]

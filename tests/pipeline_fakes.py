@@ -5,7 +5,7 @@ import re
 from documenteveryday.classification.segment_classifier import CLASSIFIER_SYSTEM_PROMPT
 from documenteveryday.domain import TranscribedWord, Transcript
 from tests.conftest import evenly_spoken_words
-from tests.fake_claude import json_response
+from tests.fake_claude import fake_response, json_response
 
 SEGMENT_INDEX_PATTERN = re.compile(r"^\[(\d+)\]", re.MULTILINE)
 
@@ -44,3 +44,32 @@ def score_first_segment(request: dict):
 
 def analysis_routes() -> dict:
     return {CLASSIFIER_SYSTEM_PROMPT[:60]: classify_every_segment, "You pick the best moments": score_first_segment}
+
+
+def write_voice_profile(request: dict):
+    return fake_response("## Openers\n- 'Okay so'\n## Sign-offs\n- 'Let's go'")
+
+
+def write_copy(request: dict):
+    return json_response(
+        {"hook_line": "Last heavy set of the night", "title": "Bracing changed my deadlift",
+         "post_caption": "Okay so I finally braced right. Let's go", "hashtags": ["#Deadlift", "gym"]}
+    )  # fmt: skip
+
+
+def translate_arabic(request: dict):
+    indices = [int(index) for index in SEGMENT_INDEX_PATTERN.findall(request["messages"][0]["content"])]
+    return json_response({"translations": [{"cue_index": index, "english": "How are you"} for index in indices]})
+
+
+def full_routes() -> dict:
+    from documenteveryday.captions.arabic_translator import TRANSLATOR_SYSTEM_PROMPT
+    from documenteveryday.copywriting.clip_copywriter import COPYWRITER_SYSTEM_PROMPT_TEMPLATE
+    from documenteveryday.voice.voice_profile import VOICE_PROFILE_SYSTEM_PROMPT
+
+    return {
+        **analysis_routes(),
+        VOICE_PROFILE_SYSTEM_PROMPT[:60]: write_voice_profile,
+        COPYWRITER_SYSTEM_PROMPT_TEMPLATE[:60]: write_copy,
+        TRANSLATOR_SYSTEM_PROMPT[:60]: translate_arabic,
+    }

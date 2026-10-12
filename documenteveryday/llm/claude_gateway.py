@@ -13,11 +13,15 @@ from documenteveryday.storage.repositories import AiDecision
 CHARACTERS_PER_TOKEN_ESTIMATE = 3
 
 
-class ClaudeRefused(RuntimeError):
+class ClaudeCallFailed(RuntimeError):
+    """Any reason a Claude call produced nothing usable: network or API error, refusal, malformed output."""
+
+
+class ClaudeRefused(ClaudeCallFailed):
     pass
 
 
-class ClaudeOutputUnusable(RuntimeError):
+class ClaudeOutputUnusable(ClaudeCallFailed):
     pass
 
 
@@ -116,7 +120,10 @@ class ClaudeGateway:
 
     def create_message(self, request: dict) -> tuple[Any, TokenUsage]:
         self.ledger.ensure_affordable(self.worst_case_cost(request))
-        response = self.client.messages.create(model=self.model, **request)
+        try:
+            response = self.client.messages.create(model=self.model, **request)
+        except Exception as error:  # the SDK already retried; callers only need to know it failed
+            raise ClaudeCallFailed(f"{type(error).__name__}: {error}") from error
         usage = token_usage_from(response.usage)
         self.ledger.record(cost_of_usage(self.model, usage))
         if response.stop_reason == "refusal":

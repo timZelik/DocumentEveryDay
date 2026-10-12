@@ -6,14 +6,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from documenteveryday.captions.arabic_translator import ArabicCaptionTranslator
 from documenteveryday.classification.segment_classifier import ClaudeSegmentClassifier, SegmentClassifier
 from documenteveryday.config import Settings
+from documenteveryday.copywriting.clip_copywriter import ClaudeClipCopywriter
 from documenteveryday.domain import ClipPlan, Segment, SegmentClassification, Transcript
 from documenteveryday.llm.budget_ledger import BatchBudgetLedger
 from documenteveryday.llm.claude_gateway import ClaudeGateway
 from documenteveryday.notifications.notifier import Notifier
 from documenteveryday.pipeline.batch_workspace import BatchWorkspace
-from documenteveryday.pipeline.clip_workflow import ClipJob, ClipWorkflow
+from documenteveryday.pipeline.clip_workflow import AI_UNAVAILABLE_ERRORS, ClipAiToolkit, ClipJob, ClipWorkflow
+from documenteveryday.qa.qa_agent import ClipQaAgent
 from documenteveryday.segmentation.segmenter import split_transcripts_into_segments
 from documenteveryday.selection.clip_selector import select_clip_plans
 from documenteveryday.selection.moment_scorer import ClaudeMomentScorer
@@ -21,6 +24,8 @@ from documenteveryday.selection.post_selection_stage import KeepSelectionAsIs, P
 from documenteveryday.storage.repositories import Repositories
 from documenteveryday.transcript_files import load_transcript, save_transcript
 from documenteveryday.transcription.transcriber import Transcriber
+from documenteveryday.voice.voice_profile import VoiceProfileBuilder
+from documenteveryday.voiceover.voiceover_provider import NaturalNarration, VoiceoverProvider
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,7 @@ class BatchPipeline:
         notifier: Notifier,
         classifier_factory: Callable[[ClaudeGateway], SegmentClassifier] = ClaudeSegmentClassifier,
         post_selection_stage: PostSelectionStage | None = None,
+        voiceover_provider: VoiceoverProvider | None = None,
     ):
         self.settings = settings
         self.repositories = repositories
@@ -51,6 +57,7 @@ class BatchPipeline:
         self.notifier = notifier
         self.classifier_factory = classifier_factory
         self.post_selection_stage = post_selection_stage or KeepSelectionAsIs()
+        self.voiceover_provider = voiceover_provider or NaturalNarration()
 
     def run(self, batch_id: int) -> None:
         already_spent_dollars = self.repositories.ai_decisions.total_cost_for_batch(batch_id)
@@ -74,7 +81,11 @@ class BatchPipeline:
         source_paths = self.source_paths_by_video(batch_id)
         analysis = self.analyse(batch_id, workspace, gateway, source_paths)
         transcripts_by_video = {transcript.source_video_id: transcript for transcript in analysis.transcripts}
-        workflow = ClipWorkflow(self.repositories, self.settings.video_encoder)
+        voice_profile = self.refresh_voice_profile(batch_id, gateway, analysis.transcripts)
+        workflow = ClipWorkflow(
+            self.repositories, self.clip_ai_toolkit(gateway, voice_profile), self.voiceover_provider,
+            self.settings.video_encoder,
+        )  # fmt: skip
         for position, plan in enumerate(analysis.plans, start=1):
             self.report(batch_id, f"Producing clip {position} of {len(analysis.plans)}")
             workflow.run(
@@ -100,6 +111,23 @@ class BatchPipeline:
             self.settings.maximum_clips_per_batch, self.settings.minimum_clip_score,
         )  # fmt: skip
         return BatchAnalysis(transcripts, segments, classifications, self.post_selection_stage.process(plans))
+
+    def refresh_voice_profile(self, batch_id: int, gateway: ClaudeGateway, transcripts: list[Transcript]) -> str:
+        """Non-fatal: if the refresh can't run, yesterday's profile is still my voice."""
+        self.report(batch_id, "Refreshing your voice profile")
+        builder = VoiceProfileBuilder(gateway, self.settings.voice_profile_path)
+        try:
+            return builder.refresh(transcripts)
+        except AI_UNAVAILABLE_ERRORS:
+            logger.warning("Voice profile refresh skipped for batch %s", batch_id, exc_info=True)
+            return builder.current_profile()
+
+    def clip_ai_toolkit(self, gateway: ClaudeGateway, voice_profile: str) -> ClipAiToolkit:
+        return ClipAiToolkit(
+            copywriter=ClaudeClipCopywriter(gateway, voice_profile),
+            translator=ArabicCaptionTranslator(gateway),
+            qa_agent=ClipQaAgent(gateway),
+        )
 
     def transcribe_all(
         self, batch_id: int, workspace: BatchWorkspace, source_paths: dict[int, Path]

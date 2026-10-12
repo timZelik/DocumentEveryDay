@@ -1,5 +1,6 @@
 """A stand-in for anthropic.Anthropic that answers by matching the system prompt. Never spends money."""
 
+import copy
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -28,7 +29,7 @@ class FakeClaudeClient:
         self.messages = self
 
     def create(self, **request) -> SimpleNamespace:
-        self.requests.append(request)
+        self.requests.append(copy.deepcopy(request))  # snapshot, as the real SDK serializes at call time
         for system_prompt_fragment, respond in self.routes.items():
             if system_prompt_fragment in request["system"]:
                 return respond(request)
