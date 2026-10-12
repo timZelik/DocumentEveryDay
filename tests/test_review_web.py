@@ -22,7 +22,7 @@ def seeded(tmp_path):
     repositories.ai_decisions.record(AiDecision(batch_id, clip_id, "copywrite", "m", 10, 5, 0.001, {"ok": 1}))
     repositories.ai_decisions.record(AiDecision(batch_id, None, "score_moments", "m", 10, 5, 0.002, {}))
     repositories.batches.set_total_cost(batch_id, 0.003)
-    client = TestClient(create_app(repositories, ACCESS_TOKEN, tmp_path))
+    client = TestClient(create_app(repositories, ACCESS_TOKEN, tmp_path, lambda batch_id: None))
     return client, repositories, batch_id, clip_id
 
 
@@ -75,7 +75,7 @@ def test_clip_media_supports_range_requests_for_ios_video(seeded):
 
 def test_app_refuses_to_start_without_a_token(tmp_path):
     with pytest.raises(ValueError):
-        create_app(make_repositories(tmp_path), "", tmp_path)
+        create_app(make_repositories(tmp_path), "", tmp_path, lambda batch_id: None)
 
 
 def test_swipe_up_marks_needs_review_and_stores_a_playable_voice_note(seeded):

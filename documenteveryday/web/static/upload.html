@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Upload footage</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="centered-page">
+    <h1>Tonight's footage</h1>
+    <p class="muted">Pick every video from this evening. Your phone buzzes when the clips are ready.</p>
+    <input id="video-input" type="file" accept="video/*,.mov,.mp4,.m4v" multiple>
+    <button id="upload-button" class="primary-button" disabled>Upload and make clips</button>
+    <div id="upload-progress" class="upload-progress"></div>
+    <p><a href="/review">Review the latest batch →</a></p>
+  </main>
+  <script src="/static/upload.js"></script>
+</body>
+</html>

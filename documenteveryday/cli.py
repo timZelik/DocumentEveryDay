@@ -5,8 +5,9 @@ import logging
 from pathlib import Path
 
 from documenteveryday.captions.caption_cues import build_caption_cues
-from documenteveryday.composition import build_pipeline, build_repositories, build_web_app
+from documenteveryday.composition import build_pipeline, build_repositories, build_server
 from documenteveryday.config import Settings
+from documenteveryday.maintenance.raw_footage_retention import delete_expired_raw_footage
 from documenteveryday.production.clip_production import ClipProductionRequest, produce_clip
 from documenteveryday.review_seeding import seed_review_batch
 from documenteveryday.selection.word_boundary_window import (
@@ -60,7 +61,7 @@ def add_cut_parser(subparsers: argparse._SubParsersAction) -> None:
 def serve_command(arguments: argparse.Namespace) -> None:
     import uvicorn
 
-    uvicorn.run(build_web_app(Settings.from_environment()), host=arguments.host, port=arguments.port)
+    uvicorn.run(build_server(Settings.from_environment()), host=arguments.host, port=arguments.port)
 
 
 def add_serve_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -120,11 +121,23 @@ def add_process_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(handler=process_command)
 
 
+def cleanup_command(arguments: argparse.Namespace) -> None:
+    settings = Settings.from_environment()
+    deleted_count = delete_expired_raw_footage(build_repositories(settings), settings.raw_footage_retention_days)
+    print(f"Deleted {deleted_count} raw videos older than {settings.raw_footage_retention_days} days.")
+
+
+def add_cleanup_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser("cleanup", help="Delete uploaded raw footage past its retention period.")
+    parser.set_defaults(handler=cleanup_command)
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="documenteveryday", description=__doc__)
     subparsers = parser.add_subparsers(required=True)
     for add_parser in (
         add_cut_parser, add_transcribe_parser, add_process_parser, add_seed_review_parser, add_serve_parser,
+        add_cleanup_parser,
     ):  # fmt: skip
         add_parser(subparsers)
     return parser
