@@ -8,7 +8,7 @@ from documenteveryday.captions.caption_cues import displayed_lines
 from documenteveryday.domain import CaptionCue, ClipPlan, ClipProblem, TranscribedWord
 from documenteveryday.media.black_frame_detector import find_black_intervals
 from documenteveryday.media.clip_renderer import VERTICAL_HEIGHT, VERTICAL_WIDTH
-from documenteveryday.media.ffmpeg_tools import probe_video_dimensions
+from documenteveryday.media.ffmpeg_tools import FfmpegFailed, probe_video_dimensions
 from documenteveryday.selection.word_boundary_window import DEFAULT_DURATION_LIMITS
 
 MID_WORD_TOLERANCE_SECONDS = 0.02
@@ -82,13 +82,20 @@ def find_caption_problems(clip: ClipUnderReview) -> list[ClipProblem]:
 
 
 def find_framing_problems(clip: ClipUnderReview) -> list[ClipProblem]:
-    dimensions = probe_video_dimensions(clip.video_path)
+    try:
+        return framing_problems_in_render(clip.video_path)
+    except FfmpegFailed as error:
+        return [ClipProblem("BAD_FRAMING", f"Could not inspect the rendered video: {str(error)[-200:]}")]
+
+
+def framing_problems_in_render(video_path: Path) -> list[ClipProblem]:
+    dimensions = probe_video_dimensions(video_path)
     problems = []
     if (dimensions.width, dimensions.height) != (VERTICAL_WIDTH, VERTICAL_HEIGHT):
         problems.append(ClipProblem("BAD_FRAMING", f"Rendered at {dimensions.width}x{dimensions.height}, not 9:16."))
     problems += [
         ClipProblem("BAD_FRAMING", f"Black frames from {start:.1f}s to {end:.1f}s (camera covered?).")
-        for start, end in find_black_intervals(clip.video_path)
+        for start, end in find_black_intervals(video_path)
     ]
     return problems
 

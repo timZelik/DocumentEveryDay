@@ -61,8 +61,11 @@ class ClaudeGateway:
         self, *, purpose: str, system: str, prompt: str, max_tokens: int, effort: str, clip_id: int | None = None
     ) -> str:
         request = self.base_request(system, [{"role": "user", "content": prompt}], max_tokens, effort)
-        response, usage = self.create_message(request)
+        response, usage = self.create_message(request, purpose, clip_id)
         text = response_text(response)
+        if response.stop_reason == "max_tokens" or not text.strip():
+            self.record(purpose, clip_id, usage, {"error": f"empty or cut-off text ({response.stop_reason})"})
+            raise ClaudeOutputUnusable(f"{purpose}: text was empty or cut off ({response.stop_reason})")
         self.record(purpose, clip_id, usage, {"text": text[:2000]})
         return text
 
@@ -79,7 +82,7 @@ class ClaudeGateway:
     ) -> dict:
         request = self.base_request(system, [{"role": "user", "content": prompt}], max_tokens, effort)
         request["output_config"]["format"] = {"type": "json_schema", "schema": schema}
-        response, usage = self.create_message(request)
+        response, usage = self.create_message(request, purpose, clip_id)
         try:
             parsed = json.loads(response_text(response))
         except json.JSONDecodeError as error:
@@ -101,7 +104,7 @@ class ClaudeGateway:
     ) -> Any:
         """One turn of a tool-using loop; the caller runs the tools and continues the conversation."""
         request = {**self.base_request(system, messages, max_tokens, effort), "tools": tools}
-        response, usage = self.create_message(request)
+        response, usage = self.create_message(request, purpose, clip_id)
         tool_calls = [{"tool": call.name, "input": call.input} for call in tool_calls_in(response)]
         self.record(purpose, clip_id, usage, {"tool_calls": tool_calls, "text": response_text(response)[:1000]})
         return response
@@ -118,7 +121,7 @@ class ClaudeGateway:
         estimated_prompt_tokens = len(json.dumps(request, default=str)) // CHARACTERS_PER_TOKEN_ESTIMATE
         return cost_of_usage(self.model, TokenUsage(estimated_prompt_tokens, request["max_tokens"]))
 
-    def create_message(self, request: dict) -> tuple[Any, TokenUsage]:
+    def create_message(self, request: dict, purpose: str, clip_id: int | None) -> tuple[Any, TokenUsage]:
         self.ledger.ensure_affordable(self.worst_case_cost(request))
         try:
             response = self.client.messages.create(model=self.model, **request)
@@ -127,7 +130,9 @@ class ClaudeGateway:
         usage = token_usage_from(response.usage)
         self.ledger.record(cost_of_usage(self.model, usage))
         if response.stop_reason == "refusal":
-            raise ClaudeRefused(f"Claude declined: {getattr(response, 'stop_details', None)}")
+            stop_details = str(getattr(response, "stop_details", None))
+            self.record(purpose, clip_id, usage, {"error": f"refused: {stop_details}"})
+            raise ClaudeRefused(f"Claude declined: {stop_details}")
         return response, usage
 
     def record(self, purpose: str, clip_id: int | None, usage: TokenUsage, decision: dict) -> None:

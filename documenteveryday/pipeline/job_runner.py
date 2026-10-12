@@ -31,5 +31,11 @@ class BatchJobRunner:
         except Exception:
             logger.exception("Batch %s crashed outside the pipeline's own error handling", batch_id)
         finally:
-            self.after_each_batch()
+            self.run_after_each_batch()
             self.pending_batch_ids.task_done()
+
+    def run_after_each_batch(self) -> None:
+        try:
+            self.after_each_batch()
+        except Exception:
+            logger.exception("After-batch housekeeping failed; the runner keeps going")

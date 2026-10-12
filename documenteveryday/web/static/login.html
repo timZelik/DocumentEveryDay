@@ -28,8 +28,9 @@
         document.getElementById("login-error").textContent = "That token is wrong.";
         return;
       }
-      const next = new URLSearchParams(location.search).get("next");
-      location.href = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      // Only this app's own pages: anything else (e.g. "/\\evil.example") could be an open redirect.
+      const next = new URLSearchParams(location.search).get("next") || "";
+      location.href = /^\/(review(\/\d+)?|upload)?$/.test(next) ? next : "/";
     });
   </script>
 </body>

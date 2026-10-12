@@ -86,15 +86,20 @@ class BatchPipeline:
             self.repositories, self.clip_ai_toolkit(gateway, voice_profile), self.voiceover_provider,
             self.settings.video_encoder,
         )  # fmt: skip
+        produced_clip_ids = []
         for position, plan in enumerate(analysis.plans, start=1):
             self.report(batch_id, f"Producing clip {position} of {len(analysis.plans)}")
-            workflow.run(
+            clip_id = workflow.run(
                 ClipJob(
                     batch_id, plan, source_paths[plan.source_video_id],
                     transcripts_by_video[plan.source_video_id], workspace.clips_directory,
                 )
             )  # fmt: skip
-        return len(analysis.plans)
+            if clip_id is not None:
+                produced_clip_ids.append(clip_id)
+        if analysis.plans and not produced_clip_ids:
+            raise RuntimeError(f"All {len(analysis.plans)} selected clips failed to render.")
+        return len(produced_clip_ids)
 
     def analyse(
         self, batch_id: int, workspace: BatchWorkspace, gateway: ClaudeGateway, source_paths: dict[int, Path]
@@ -141,7 +146,10 @@ class BatchPipeline:
     def cached_transcript(self, workspace: BatchWorkspace, source_video_id: int, source_path: Path) -> Transcript:
         transcript_path = workspace.transcript_path(source_video_id)
         if transcript_path.exists():
-            return load_transcript(transcript_path)
+            try:
+                return load_transcript(transcript_path)
+            except ValueError:
+                logger.warning("Unreadable cached transcript %s; transcribing again", transcript_path)
         transcript = self.transcriber.transcribe(source_path, source_video_id)
         save_transcript(transcript, transcript_path)
         return transcript

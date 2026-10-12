@@ -66,8 +66,19 @@ class ClipWorkflow:
         self.voiceover_provider = voiceover_provider
         self.video_encoder = video_encoder
 
-    def run(self, job: ClipJob) -> int:
+    def run(self, job: ClipJob) -> int | None:
+        """Returns the clip id, or None if this one clip could not be produced (the batch carries on)."""
         clip_id = self.repositories.clips.create(job.batch_id, job.plan)
+        try:
+            return self.produce(job, clip_id)
+        except Exception as error:  # e.g. ffmpeg on a corrupt stretch of footage: lose one clip, not the batch
+            logger.exception("Clip %s could not be produced", clip_id)
+            self.repositories.clips.update(
+                clip_id, qa_status="render_failed", qa_summary=f"{type(error).__name__}: {error}"
+            )
+            return None
+
+    def produce(self, job: ClipJob, clip_id: int) -> int:
         notes: list[str] = []
         clip_copy = self.write_copy(job, clip_id, notes)
         workbench = self.first_render(job, clip_id, clip_copy, notes)

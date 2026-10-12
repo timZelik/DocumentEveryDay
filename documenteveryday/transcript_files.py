@@ -8,8 +8,10 @@ from documenteveryday.domain import TranscribedWord, Transcript
 
 
 def save_transcript(transcript: Transcript, transcript_path: Path) -> None:
+    """Written to a temporary name and renamed, so a crash mid-write never leaves a half transcript."""
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
-    transcript_path.write_text(
+    partial_path = transcript_path.with_name(transcript_path.name + ".partial")
+    partial_path.write_text(
         json.dumps(
             {
                 "source_video_id": transcript.source_video_id,
@@ -18,6 +20,7 @@ def save_transcript(transcript: Transcript, transcript_path: Path) -> None:
             ensure_ascii=False,
         )
     )
+    partial_path.replace(transcript_path)
 
 
 def load_transcript(transcript_path: Path) -> Transcript:

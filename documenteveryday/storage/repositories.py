@@ -109,7 +109,13 @@ class ClipRepository:
         return [decode_json_columns(row) for row in rows]
 
     def delete_for_batch(self, batch_id: int) -> None:
-        """AI decisions are kept: money spent on an interrupted run still counts toward the batch."""
+        """AI decisions are kept (that money still counts toward the batch) but detached, because SQLite
+        reuses deleted clip ids and a new clip must never inherit an old clip's log."""
+        self.database.execute(
+            "UPDATE ai_decisions SET clip_id = NULL, purpose = purpose || ' (interrupted run)'"
+            " WHERE batch_id = ? AND clip_id IS NOT NULL",
+            (batch_id,),
+        )
         self.database.execute("DELETE FROM clips WHERE batch_id = ?", (batch_id,))
 
 

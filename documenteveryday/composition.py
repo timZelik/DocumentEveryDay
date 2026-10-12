@@ -1,5 +1,7 @@
 """Wires concrete pieces together from Settings. The only module that knows about every other one."""
 
+import logging
+
 from documenteveryday.config import Settings
 from documenteveryday.maintenance.raw_footage_retention import delete_expired_raw_footage
 from documenteveryday.notifications.notifier import LoggingNotifier, Notifier
@@ -12,6 +14,8 @@ from documenteveryday.transcription.transcriber import FasterWhisperTranscriber
 from documenteveryday.web.app import create_app
 
 INTERRUPTED_BATCH_STATUSES = ("queued", "processing")
+
+logger = logging.getLogger(__name__)
 
 
 def build_repositories(settings: Settings) -> Repositories:
@@ -46,7 +50,10 @@ def build_server(settings: Settings):
     pipeline = build_pipeline(settings, repositories, build_notifier(settings))
 
     def clean_up_old_footage() -> None:
-        delete_expired_raw_footage(repositories, settings.raw_footage_retention_days)
+        try:
+            delete_expired_raw_footage(repositories, settings.raw_footage_retention_days)
+        except Exception:  # housekeeping must never stop the server from starting or processing
+            logger.exception("Raw footage cleanup failed")
 
     runner = BatchJobRunner(pipeline.run, after_each_batch=clean_up_old_footage)
     clean_up_old_footage()

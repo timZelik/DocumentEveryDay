@@ -11,7 +11,15 @@ const POLL_INTERVAL_MILLISECONDS = 10000;
 const FINISHED_BATCH_STATUSES = ["ready", "failed"];
 const VOICE_NOTE_MIME_TYPES = ["audio/mp4", "audio/webm", "audio/ogg"];
 
-const state = { payload: null, passStatus: "pending", queue: [], queueIndex: 0, videoFilesByClipId: new Map() };
+const state = {
+  payload: null,
+  passStatus: "pending",
+  queue: [],
+  queueIndex: 0,
+  videoFilesByClipId: new Map(),
+  localDecisions: new Map(), // decisions made on this page win over a poll that raced the POST
+  isBusy: false, // true from a decision until the next card shows, so one clip can't be decided twice
+};
 
 // ---------- data ----------
 
@@ -40,22 +48,39 @@ function currentClip() {
 
 // A pass walks every clip that had a given status when it started: first "pending", later "needs_review".
 function startPass(reviewStatus) {
+  state.isBusy = false;
   state.passStatus = reviewStatus;
   state.queue = clipsWithStatus(reviewStatus);
   state.queueIndex = 0;
   renderCurrentCard();
 }
 
+function applyLocalDecisions(payload) {
+  for (const clip of payload.clips) {
+    if (state.localDecisions.has(clip.id)) clip.review_status = state.localDecisions.get(clip.id);
+  }
+  return payload;
+}
+
+// Swaps in fresh clip objects and appends clips that became playable, without touching the card on screen.
+function refreshQueue() {
+  const freshById = new Map(state.payload.clips.map((clip) => [clip.id, clip]));
+  state.queue = state.queue.map((clip) => freshById.get(clip.id) || clip);
+  const queuedIds = new Set(state.queue.map((clip) => clip.id));
+  state.queue.push(...clipsWithStatus(state.passStatus).filter((clip) => !queuedIds.has(clip.id)));
+}
+
 async function loadBatch() {
   const wasShowingCard = Boolean(currentClip());
   try {
-    state.payload = await fetchJson(`/api/batches/${batchIdFromPath()}`);
+    state.payload = applyLocalDecisions(await fetchJson(`/api/batches/${batchIdFromPath()}`));
   } catch (error) {
     renderEmptyState("No batches yet", "Upload an evening of footage to get started.", [uploadLink()]);
     return;
   }
   renderHeader();
-  if (!wasShowingCard) startPass("pending"); // polling never yanks away the clip being watched
+  if (wasShowingCard) refreshQueue(); // polling never yanks away the clip being watched
+  else startPass("pending");
   if (!FINISHED_BATCH_STATUSES.includes(state.payload.batch.status)) {
     setTimeout(loadBatch, POLL_INTERVAL_MILLISECONDS);
   }
@@ -63,6 +88,7 @@ async function loadBatch() {
 
 function recordDecision(clip, decision) {
   clip.review_status = decision;
+  state.localDecisions.set(clip.id, decision);
   renderHeader();
   return fetchJson(`/api/clips/${clip.id}/review`, {
     method: "POST",
@@ -99,8 +125,15 @@ function shareVideoFile(clip) {
 
 // ---------- the three decisions ----------
 
-function approveCurrentClip() {
+function claimCurrentClip() {
   const clip = currentClip();
+  if (!clip || state.isBusy) return null;
+  state.isBusy = true;
+  return clip;
+}
+
+function approveCurrentClip() {
+  const clip = claimCurrentClip();
   if (!clip) return;
   if (navigator.clipboard) navigator.clipboard.writeText(clip.clipboard_text).catch(() => {});
   recordDecision(clip, "approved");
@@ -108,19 +141,20 @@ function approveCurrentClip() {
     .then(() => flyOffThenAdvance("right"))
     .catch((error) => {
       if (error.name !== "AbortError") showToast("Caption copied. Tap “Save video” when it's ready.");
+      state.isBusy = false;
       renderCurrentCard();
     });
 }
 
 function rejectCurrentClip() {
-  const clip = currentClip();
+  const clip = claimCurrentClip();
   if (!clip) return;
   recordDecision(clip, "rejected");
   flyOffThenAdvance("left");
 }
 
 function sendCurrentClipForFurtherReview() {
-  const clip = currentClip();
+  const clip = claimCurrentClip();
   if (!clip) return;
   recordDecision(clip, "needs_review");
   openVoiceNoteSheet(clip);
@@ -128,6 +162,7 @@ function sendCurrentClipForFurtherReview() {
 
 function advanceToNextClip() {
   state.queueIndex = Math.min(state.queueIndex + 1, state.queue.length);
+  state.isBusy = false;
   renderCurrentCard();
 }
 
@@ -172,8 +207,10 @@ function openVoiceNoteSheet(clip) {
   let recorder = null;
   let startedAt = 0;
   let timer = null;
+  let wasSkipped = false;
   skipButton.addEventListener("click", () => {
-    if (recorder && recorder.state === "recording") recorder.stop();
+    wasSkipped = true;
+    if (recorder && recorder.state === "recording") recorder.stop(); // its stop handler only releases the mic
     closeSheetAndAdvance(sheet);
   });
   recordButton.addEventListener("click", async () => {
@@ -187,6 +224,7 @@ function openVoiceNoteSheet(clip) {
       recorder.addEventListener("stop", () => {
         clearInterval(timer);
         stream.getTracks().forEach((track) => track.stop());
+        if (wasSkipped) return;
         status.textContent = "Saving your note…";
         uploadVoiceNote(clip, new Blob(chunks, { type: recorder.mimeType }))
           .then(() => showToast("Sent for further review with your note."))
@@ -397,7 +435,7 @@ function attachSwipeGestures(card) {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (document.querySelector(".voice-note-sheet")) return;
+  if (event.repeat || document.querySelector(".voice-note-sheet")) return;
   if (event.key === "ArrowRight") approveCurrentClip();
   if (event.key === "ArrowLeft") rejectCurrentClip();
   if (event.key === "ArrowUp") sendCurrentClipForFurtherReview();
