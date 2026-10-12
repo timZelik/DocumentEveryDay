@@ -109,7 +109,7 @@ class ClipRepository:
         return [decode_json_columns(row) for row in rows]
 
     def delete_for_batch(self, batch_id: int) -> None:
-        self.database.execute("DELETE FROM ai_decisions WHERE batch_id = ?", (batch_id,))
+        """AI decisions are kept: money spent on an interrupted run still counts toward the batch."""
         self.database.execute("DELETE FROM clips WHERE batch_id = ?", (batch_id,))
 
 
@@ -143,6 +143,12 @@ class AiDecisionRepository:
     def for_batch(self, batch_id: int) -> list[dict]:
         rows = self.database.fetch_all("SELECT * FROM ai_decisions WHERE batch_id = ? ORDER BY id", (batch_id,))
         return [{**row, "decision": json.loads(row["decision"])} for row in rows]
+
+    def total_cost_for_batch(self, batch_id: int) -> float:
+        row = self.database.fetch_one(
+            "SELECT COALESCE(SUM(cost_dollars), 0) AS total FROM ai_decisions WHERE batch_id = ?", (batch_id,)
+        )
+        return row["total"]
 
 
 @dataclass(frozen=True)

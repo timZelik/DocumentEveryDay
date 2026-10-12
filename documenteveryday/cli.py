@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from documenteveryday.captions.caption_cues import build_caption_cues
-from documenteveryday.composition import build_repositories, build_web_app
+from documenteveryday.composition import build_pipeline, build_repositories, build_web_app
 from documenteveryday.config import Settings
 from documenteveryday.production.clip_production import ClipProductionRequest, produce_clip
 from documenteveryday.review_seeding import seed_review_batch
@@ -14,7 +14,8 @@ from documenteveryday.selection.word_boundary_window import (
     fit_word_range_to_duration,
     word_range_covering,
 )
-from documenteveryday.transcript_files import load_transcript
+from documenteveryday.transcript_files import load_transcript, save_transcript
+from documenteveryday.transcription.transcriber import FasterWhisperTranscriber
 
 
 def cut_command(arguments: argparse.Namespace) -> None:
@@ -85,10 +86,46 @@ def add_seed_review_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(handler=seed_review_command)
 
 
+def transcribe_command(arguments: argparse.Namespace) -> None:
+    transcript = FasterWhisperTranscriber(arguments.model).transcribe(arguments.video, source_video_id=0)
+    save_transcript(transcript, arguments.output)
+    arabic_word_count = sum(word.is_arabic for word in transcript.words)
+    print(f"{len(transcript.words)} words ({arabic_word_count} in Arabic script) -> {arguments.output}")
+
+
+def add_transcribe_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser("transcribe", help="Transcribe one video to timed words (free, local).")
+    parser.add_argument("video", type=Path)
+    parser.add_argument("--output", type=Path, default=Path("transcript.json"))
+    parser.add_argument("--model", default="small", help="faster-whisper model size.")
+    parser.set_defaults(handler=transcribe_command)
+
+
+def process_command(arguments: argparse.Namespace) -> None:
+    """Runs the whole pipeline on local files, without the web app. Your originals are never deleted."""
+    settings = Settings.from_environment()
+    repositories = build_repositories(settings)
+    batch_id = repositories.batches.create()
+    for video in arguments.videos:
+        repositories.source_videos.add(batch_id, video.name, str(video.resolve()), owned_by_pipeline=False)
+    build_pipeline(settings, repositories).run(batch_id)
+    batch = repositories.batches.get(batch_id)
+    print(f"Batch {batch_id} {batch['status']}: {batch['status_detail']}")
+    print(f"AI cost ${batch['total_cost_dollars']:.4f}. Review: {settings.public_base_url}/review/{batch_id}")
+
+
+def add_process_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser("process", help="Run the full pipeline on local videos.")
+    parser.add_argument("videos", type=Path, nargs="+")
+    parser.set_defaults(handler=process_command)
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="documenteveryday", description=__doc__)
     subparsers = parser.add_subparsers(required=True)
-    for add_parser in (add_cut_parser, add_seed_review_parser, add_serve_parser):
+    for add_parser in (
+        add_cut_parser, add_transcribe_parser, add_process_parser, add_seed_review_parser, add_serve_parser,
+    ):  # fmt: skip
         add_parser(subparsers)
     return parser
 
