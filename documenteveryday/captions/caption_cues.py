@@ -53,12 +53,8 @@ def close_gaps_between_cues(cues: list[CaptionCue]) -> list[CaptionCue]:
     return held_cues
 
 
-def build_caption_cues(
-    words: Sequence[TranscribedWord], clip_start: float, clip_end: float
-) -> list[CaptionCue]:
-    words_inside_clip = [
-        word for word in words if word.end_seconds > clip_start and word.start_seconds < clip_end
-    ]
+def build_caption_cues(words: Sequence[TranscribedWord], clip_start: float, clip_end: float) -> list[CaptionCue]:
+    words_inside_clip = [word for word in words if word.end_seconds > clip_start and word.start_seconds < clip_end]
     clip_duration = clip_end - clip_start
     cues = [
         cue_from_word_run(word_run, clip_start, clip_duration)

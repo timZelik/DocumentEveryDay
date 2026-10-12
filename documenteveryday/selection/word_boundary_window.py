@@ -104,9 +104,7 @@ def fit_word_range_to_duration(
     return snap_end_to_sentence_boundary(words, short_enough_range, limits)
 
 
-def word_range_covering(
-    words: Sequence[TranscribedWord], start_seconds: float, end_seconds: float
-) -> WordRange | None:
+def word_range_covering(words: Sequence[TranscribedWord], start_seconds: float, end_seconds: float) -> WordRange | None:
     """The words spoken between two timestamps, e.g. from a hand-picked cut."""
     inside_indices = [
         index

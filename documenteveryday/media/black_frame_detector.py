@@ -21,7 +21,4 @@ def find_black_intervals(video_path: Path, minimum_seconds: float = 1.0) -> list
             "-",
         ]
     )
-    return [
-        (float(match["start"]), float(match["end"]))
-        for match in BLACK_INTERVAL_PATTERN.finditer(filter_report)
-    ]
+    return [(float(match["start"]), float(match["end"])) for match in BLACK_INTERVAL_PATTERN.finditer(filter_report)]

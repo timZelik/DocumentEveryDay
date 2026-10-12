@@ -33,9 +33,7 @@ def build_video_filter(subtitles_filename: str | None) -> str:
         f"scale={VERTICAL_WIDTH}:{VERTICAL_HEIGHT}:force_original_aspect_ratio=increase,"
         f"crop={VERTICAL_WIDTH}:{VERTICAL_HEIGHT},setsar=1"
     )
-    return (
-        f"{fill_vertical_frame},subtitles={subtitles_filename}" if subtitles_filename else fill_vertical_frame
-    )
+    return f"{fill_vertical_frame},subtitles={subtitles_filename}" if subtitles_filename else fill_vertical_frame
 
 
 def build_audio_arguments(replacement_audio_path: Path | None) -> list[str]:

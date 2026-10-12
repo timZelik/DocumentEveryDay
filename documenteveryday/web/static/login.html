@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DocumentEveryday</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="centered-page">
+    <h1>DocumentEveryday</h1>
+    <p class="muted">Paste your access token once. This phone stays signed in.</p>
+    <form id="login-form">
+      <input id="token-input" type="password" autocomplete="current-password" placeholder="Access token" required>
+      <button class="primary-button" type="submit">Sign in</button>
+    </form>
+    <p id="login-error" class="muted"></p>
+  </main>
+  <script>
+    document.getElementById("login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const response = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: document.getElementById("token-input").value }),
+      });
+      if (!response.ok) {
+        document.getElementById("login-error").textContent = "That token is wrong.";
+        return;
+      }
+      const next = new URLSearchParams(location.search).get("next");
+      location.href = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+    });
+  </script>
+</body>
+</html>

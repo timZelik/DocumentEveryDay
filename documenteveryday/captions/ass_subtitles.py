@@ -43,8 +43,7 @@ def escape_ass_text(text: str) -> str:
 
 def dialogue_line(start_seconds: float, end_seconds: float, style: str, text: str) -> str:
     return (
-        f"Dialogue: 0,{format_ass_timestamp(start_seconds)},{format_ass_timestamp(end_seconds)},"
-        f"{style},,0,0,0,,{text}"
+        f"Dialogue: 0,{format_ass_timestamp(start_seconds)},{format_ass_timestamp(end_seconds)},{style},,0,0,0,,{text}"
     )
 
 
@@ -56,15 +55,11 @@ def cue_markup(cue: CaptionCue) -> str:
 
 
 def hook_dialogue(hook_line: str, clip_duration: float) -> str:
-    hook_markup = r"\N".join(
-        escape_ass_text(line) for line in wrap_caption_text(hook_line, HOOK_LINE_CHARACTERS)
-    )
+    hook_markup = r"\N".join(escape_ass_text(line) for line in wrap_caption_text(hook_line, HOOK_LINE_CHARACTERS))
     return dialogue_line(0.0, min(HOOK_ON_SCREEN_SECONDS, clip_duration), "Hook", hook_markup)
 
 
 def render_ass_document(cues: Sequence[CaptionCue], hook_line: str, clip_duration: float) -> str:
     dialogue_lines = [hook_dialogue(hook_line, clip_duration)] if hook_line.strip() else []
-    dialogue_lines += [
-        dialogue_line(cue.start_seconds, cue.end_seconds, "Caption", cue_markup(cue)) for cue in cues
-    ]
+    dialogue_lines += [dialogue_line(cue.start_seconds, cue.end_seconds, "Caption", cue_markup(cue)) for cue in cues]
     return ASS_HEADER + "\n".join(dialogue_lines) + "\n"

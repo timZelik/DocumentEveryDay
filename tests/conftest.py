@@ -14,9 +14,7 @@ def evenly_spoken_words(sentence_texts: list[str], seconds_per_word: float = 0.5
         sentence_words = sentence.split()
         for position, text in enumerate(sentence_words):
             is_last = position == len(sentence_words) - 1
-            words.append(
-                TranscribedWord(text + ("." if is_last else ""), clock, clock + seconds_per_word * 0.9)
-            )
+            words.append(TranscribedWord(text + ("." if is_last else ""), clock, clock + seconds_per_word * 0.9))
             clock += seconds_per_word
     return tuple(words)
 

@@ -36,9 +36,7 @@ class Settings:
     def from_environment(cls) -> "Settings":
         return cls(
             data_directory=environment_path("DOCUMENTEVERYDAY_DATA_DIRECTORY", PROJECT_ROOT / "data"),
-            rule_path=environment_path(
-                "DOCUMENTEVERYDAY_RULE_PATH", PROJECT_ROOT / "rules/good_clip_rule.md"
-            ),
+            rule_path=environment_path("DOCUMENTEVERYDAY_RULE_PATH", PROJECT_ROOT / "rules/good_clip_rule.md"),
             voice_profile_path=environment_path(
                 "DOCUMENTEVERYDAY_VOICE_PROFILE_PATH", PROJECT_ROOT / "voice/my_voice.md"
             ),
@@ -50,9 +48,7 @@ class Settings:
             ntfy_server=os.environ.get("DOCUMENTEVERYDAY_NTFY_SERVER", "https://ntfy.sh"),
             ntfy_topic=os.environ.get("DOCUMENTEVERYDAY_NTFY_TOPIC", ""),
             public_base_url=os.environ.get("DOCUMENTEVERYDAY_PUBLIC_BASE_URL", "http://localhost:8000"),
-            raw_footage_retention_days=int(
-                os.environ.get("DOCUMENTEVERYDAY_RAW_FOOTAGE_RETENTION_DAYS", "5")
-            ),
+            raw_footage_retention_days=int(os.environ.get("DOCUMENTEVERYDAY_RAW_FOOTAGE_RETENTION_DAYS", "5")),
             maximum_clips_per_batch=int(os.environ.get("DOCUMENTEVERYDAY_MAXIMUM_CLIPS_PER_BATCH", "10")),
             minimum_clip_score=int(os.environ.get("DOCUMENTEVERYDAY_MINIMUM_CLIP_SCORE", "5")),
         )
