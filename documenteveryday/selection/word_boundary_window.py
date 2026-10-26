@@ -7,6 +7,7 @@ from documenteveryday.domain import TranscribedWord
 
 LEAD_PADDING_SECONDS = 0.15
 TAIL_PADDING_SECONDS = 0.30
+MAXIMUM_INTERNAL_PAUSE_SECONDS = 2.5  # longer silence inside a clip is dead air (QA uses the same limit)
 
 
 @dataclass(frozen=True)
@@ -42,15 +43,28 @@ def span_seconds(words: Sequence[TranscribedWord], word_range: WordRange) -> flo
     return end_seconds - start_seconds
 
 
+def pause_before(words: Sequence[TranscribedWord], index: int) -> float:
+    return words[index].start_seconds - words[index - 1].end_seconds
+
+
+def can_grow_forward(words: Sequence[TranscribedWord], last_index: int) -> bool:
+    return last_index + 1 < len(words) and pause_before(words, last_index + 1) <= MAXIMUM_INTERNAL_PAUSE_SECONDS
+
+
+def can_grow_backward(words: Sequence[TranscribedWord], first_index: int) -> bool:
+    return first_index > 0 and pause_before(words, first_index) <= MAXIMUM_INTERNAL_PAUSE_SECONDS
+
+
 def extend_until_long_enough(
     words: Sequence[TranscribedWord], word_range: WordRange, limits: DurationLimits
 ) -> WordRange | None:
-    """Grows forward first (the story usually continues), then backward. None if the video is too short."""
+    """Grows forward first (the story usually continues), then backward, but never across a long silence:
+    that would fill the clip with dead air and a different moment. None if the moment can't reach the minimum."""
     first_index, last_index = word_range.first_word_index, word_range.last_word_index
     while span_seconds(words, WordRange(first_index, last_index)) < limits.minimum_seconds:
-        if last_index + 1 < len(words):
+        if can_grow_forward(words, last_index):
             last_index += 1
-        elif first_index > 0:
+        elif can_grow_backward(words, first_index):
             first_index -= 1
         else:
             return None

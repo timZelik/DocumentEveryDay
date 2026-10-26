@@ -45,3 +45,17 @@ def test_word_range_covering_finds_words_inside_timestamps():
     words = evenly_spoken_words(["zero one two three four"])
     assert word_range_covering(words, 0.6, 1.6) == WordRange(1, 3)
     assert word_range_covering(words, 100, 200) is None
+
+
+def test_short_moment_never_grows_across_a_long_silence_into_another_moment():
+    meal_prep = evenly_spoken_words(["chicken rice and broccoli done"] * 5)  # about 12.5 seconds
+    arabic_after_silence = evenly_spoken_words(["now arabic study"] * 10, start=meal_prep[-1].end_seconds + 27)
+    words = meal_prep + arabic_after_silence
+    assert fit_word_range_to_duration(words, WordRange(0, len(meal_prep) - 1), DurationLimits(15, 60)) is None
+
+
+def test_short_moment_still_grows_across_normal_pauses():
+    first = evenly_spoken_words(["chicken rice and broccoli done"] * 5)
+    more = evenly_spoken_words(["seasoned the rice while it cooked"] * 5, start=first[-1].end_seconds + 1.5)
+    fitted = fit_word_range_to_duration(first + more, WordRange(0, len(first) - 1), DurationLimits(15, 60))
+    assert fitted is not None and fitted.last_word_index >= len(first)

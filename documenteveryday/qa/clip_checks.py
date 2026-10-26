@@ -9,10 +9,9 @@ from documenteveryday.domain import CaptionCue, ClipPlan, ClipProblem, Transcrib
 from documenteveryday.media.black_frame_detector import find_black_intervals
 from documenteveryday.media.clip_renderer import VERTICAL_HEIGHT, VERTICAL_WIDTH
 from documenteveryday.media.ffmpeg_tools import FfmpegFailed, probe_video_dimensions
-from documenteveryday.selection.word_boundary_window import DEFAULT_DURATION_LIMITS
+from documenteveryday.selection.word_boundary_window import DEFAULT_DURATION_LIMITS, MAXIMUM_INTERNAL_PAUSE_SECONDS
 
 MID_WORD_TOLERANCE_SECONDS = 0.02
-MAXIMUM_INTERNAL_PAUSE_SECONDS = 2.5
 MAXIMUM_EDGE_SILENCE_SECONDS = 1.2
 MAXIMUM_CAPTION_LINE_CHARACTERS = 30
 
