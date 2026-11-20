@@ -11,9 +11,9 @@ hardware I already own: **$0 infrastructure, about $0.02 of Claude Haiku per eve
 
 ## The daily mosaic (one video per day)
 
-Every clip I record in a day becomes one tile of a 9:16 puzzle. Tiles pop in one by one in the order the
-day happened, and each loops **~3 seconds** of its clip. Then the whole grid plays at once and the stats
-(e.g. the Strava numbers) appear. Twelve clips means twelve tiles. A 13-clip day comes out about 15 seconds long.
+Every clip I record in a day becomes one tile of a 9:16 puzzle, in the order the day happened. All tiles
+play at once from the first frame, each looping **~3 seconds** of its clip, with the day's stats (e.g. the
+Strava numbers) underneath. Twelve clips means twelve tiles. The video is 6 seconds by default (`--length`).
 
 - **Picking the 3 seconds costs no AI.** Each clip is decoded once at 5 fps as tiny grey frames, and the
   busiest 3-second window wins. The first and last half second are skipped (fumbling with record), dark

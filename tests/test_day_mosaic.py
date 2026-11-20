@@ -68,4 +68,4 @@ def test_plan_and_render_a_small_day(tmp_path):
     plan = replace(plan, clips=(*plan.clips[:2], replace(plan.clips[2], skip=True)))
     output = render_day_mosaic(plan, tmp_path, tmp_path / "day.mp4", "libx264")
     assert probe_video_dimensions(output).width == 1080
-    assert probe_duration_seconds(output) == pytest.approx(5.0, abs=0.3)  # 1 stagger + 4s hold
+    assert probe_duration_seconds(output) == pytest.approx(6.0, abs=0.3)

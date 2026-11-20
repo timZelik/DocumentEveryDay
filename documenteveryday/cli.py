@@ -179,7 +179,9 @@ def make_day_command(arguments: argparse.Namespace) -> None:
         plan = load_plan(folder)
         if plan is None:
             raise SystemExit("No day.toml yet: run plan-day first.")
-        output = render_day_mosaic(plan, folder, folder / "day.mp4", settings.video_encoder, arguments.music)
+        output = render_day_mosaic(
+            plan, folder, folder / "day.mp4", settings.video_encoder, arguments.music, arguments.length
+        )
         print(f"Rendered {output}")
         if arguments.to_photos:
             save_to_photos(output)
@@ -200,6 +202,7 @@ def add_day_parsers(subparsers: argparse._SubParsersAction) -> None:
         parser.add_argument("--auto-label", action="store_true", help="Name tiles with one cheap Haiku call.")
         parser.add_argument("--collect", action="store_true", help="Mac: first pull the date's videos from Photos.")
         parser.add_argument("--album", help="With --collect: only this Photos album.")
+        parser.add_argument("--length", type=float, default=6.0, help="Video length in seconds.")
         parser.add_argument("--music", type=Path, help="Optional audio track; otherwise silent.")
         parser.add_argument("--to-photos", action="store_true", help="Mac: import day.mp4 into Photos.")
         parser.set_defaults(handler=make_day_command, command_step=step)
