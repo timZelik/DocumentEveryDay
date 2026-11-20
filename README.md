@@ -9,7 +9,40 @@ than a virality score. Copy is written from a style profile learned from my own 
 decision (tag, score, reason, QA verdict, tokens, cost) is logged and shown on the clip's card. It runs on
 hardware I already own: **$0 infrastructure, about $0.02 of Claude Haiku per evening.**
 
-## How a batch flows
+## The daily mosaic (one video per day)
+
+Every clip I record in a day becomes one tile of a 9:16 puzzle. Tiles pop in one by one in the order the
+day happened, and each loops **~3 seconds** of its clip. Then the whole grid plays at once and the stats
+(e.g. the Strava numbers) appear. Twelve clips means twelve tiles. A 13-clip day comes out about 15 seconds long.
+
+- **Picking the 3 seconds costs no AI.** Each clip is decoded once at 5 fps as tiny grey frames, and the
+  busiest 3-second window wins. The first and last half second are skipped (fumbling with record), dark
+  windows (camera in a pocket) are penalised, and whip pans are capped.
+- **Naming the tiles is the only AI, and it's optional:** `--auto-label` sends one 320px frame per clip in
+  **a single Claude Haiku call** (about 300 tokens per clip, well under a cent a day).
+- **Everything is editable** in `data/days/<date>/day.toml`: title, stats, each tile's label and second
+  line (`detail`), its `start` second, `seconds`, `skip`. Re-planning keeps your edits.
+
+```bash
+# Anywhere: put the day's clips in a folder, then
+python -m documenteveryday plan-day path/to/clips --auto-label   # writes day.toml
+#   edit day.toml: stats = "Run 5.2 km · 28:14 · 5:26/km", labels, skips
+python -m documenteveryday render-day path/to/clips              # -> path/to/clips/day.mp4
+# Optional: --music track.m4a (otherwise silent: add a trending sound in the app when posting)
+
+# Mac, fully automatic: Photos -> mosaic -> back into Photos (so it's in the iPhone camera roll) -> ntfy push
+pip install osxphotos
+./scripts/nightly_day.sh            # today; or ./scripts/nightly_day.sh 2026-11-20
+```
+
+**Getting clips to the Mac with no taps.** iPhone clips reach the Mac's Photos library through iCloud
+Photos. For the Meta glasses, turn on automatic import/saving to the camera roll in the Meta AI app; those
+clips then follow the same path. `--collect` exports every video recorded on that date (add
+`--album NAME` to limit it to an album). The first osxphotos run needs Terminal to have Photos access
+(System Settings → Privacy & Security). To run it every night, schedule `scripts/nightly_day.sh` with cron
+or launchd at, say, 23:30.
+
+## How a batch flows (talking clips)
 
 ```
 iPhone upload ──► transcribe (faster-whisper, local, free) ──► segment at pauses

@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+from datetime import date
 from pathlib import Path
 
 from documenteveryday.captions.caption_cues import build_caption_cues
@@ -132,12 +133,84 @@ def add_cleanup_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(handler=cleanup_command)
 
 
+def day_directory_for(arguments: argparse.Namespace, settings: Settings) -> Path:
+    if getattr(arguments, "folder", None):
+        return arguments.folder
+    return settings.data_directory / "days" / arguments.date.isoformat()
+
+
+def default_title(day: date) -> str:
+    return day.strftime("%A · %b ") + str(day.day)
+
+
+def claude_labeler(settings: Settings):
+    import anthropic
+
+    from documenteveryday.day.auto_labels import label_clips
+
+    client = anthropic.Anthropic()
+
+    def labeler(clips, day_directory):
+        labels, usage = label_clips(clips, day_directory, client, settings.claude_model)
+        print(f"Labelled {len(clips)} clips with {settings.claude_model}: {usage}")
+        return labels
+
+    return labeler
+
+
+def make_day_command(arguments: argparse.Namespace) -> None:
+    """Collect (Mac) -> plan (free motion picks, optional Haiku labels) -> render the mosaic."""
+    from documenteveryday.day.day_plan import load_plan
+    from documenteveryday.day.day_planner import plan_day
+    from documenteveryday.day.mosaic_renderer import render_day_mosaic
+    from documenteveryday.day.photos_collector import collect_day_videos, save_to_photos
+
+    settings = Settings.from_environment()
+    folder = day_directory_for(arguments, settings)
+    if arguments.collect:
+        collect_day_videos(arguments.date, folder, arguments.album)
+    if not folder.is_dir():
+        raise SystemExit(f"No folder {folder}: put the day's clips there, or pass --collect on the Mac.")
+    if arguments.command_step in ("plan", "make"):
+        labeler = claude_labeler(settings) if arguments.auto_label else None
+        plan = plan_day(folder, arguments.title or default_title(arguments.date), arguments.seconds, labeler)
+        print(f"Planned {len(plan.shown_clips)} clips -> {folder / 'day.toml'} (edit labels, stats, starts)")
+    if arguments.command_step in ("render", "make"):
+        plan = load_plan(folder)
+        if plan is None:
+            raise SystemExit("No day.toml yet: run plan-day first.")
+        output = render_day_mosaic(plan, folder, folder / "day.mp4", settings.video_encoder, arguments.music)
+        print(f"Rendered {output}")
+        if arguments.to_photos:
+            save_to_photos(output)
+            print("Saved to Photos (album DocumentEveryDay); iCloud will put it on your iPhone.")
+
+
+def add_day_parsers(subparsers: argparse._SubParsersAction) -> None:
+    for step, help_text in (
+        ("plan", "Order the day's clips and pick ~3s of each (free), writing day.toml."),
+        ("render", "Render day.toml into the day's mosaic video, day.mp4."),
+        ("make", "Plan and render in one go."),
+    ):
+        parser = subparsers.add_parser(f"{step}-day", help=help_text)
+        parser.add_argument("folder", type=Path, nargs="?", help="Folder of clips (default data/days/<date>).")
+        parser.add_argument("--date", type=date.fromisoformat, default=date.today(), help="YYYY-MM-DD")
+        parser.add_argument("--title", default="", help="Defaults to e.g. 'Thursday · Nov 20'.")
+        parser.add_argument("--seconds", type=float, default=3.0, help="Seconds shown from each clip.")
+        parser.add_argument("--auto-label", action="store_true", help="Name tiles with one cheap Haiku call.")
+        parser.add_argument("--collect", action="store_true", help="Mac: first pull the date's videos from Photos.")
+        parser.add_argument("--album", help="With --collect: only this Photos album.")
+        parser.add_argument("--music", type=Path, help="Optional audio track; otherwise silent.")
+        parser.add_argument("--to-photos", action="store_true", help="Mac: import day.mp4 into Photos.")
+        parser.set_defaults(handler=make_day_command, command_step=step)
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="documenteveryday", description=__doc__)
     subparsers = parser.add_subparsers(required=True)
     for add_parser in (
         add_cut_parser, add_transcribe_parser, add_process_parser, add_seed_review_parser, add_serve_parser,
-        add_cleanup_parser,
+        add_cleanup_parser, add_day_parsers,
     ):  # fmt: skip
         add_parser(subparsers)
     return parser
